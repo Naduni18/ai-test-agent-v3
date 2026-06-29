@@ -222,9 +222,11 @@
                         Requirements Document
                     </label>
 
+                    <!-- reqFile must be OUTSIDE uploadZone so its click cannot bubble up to the zone's click handler -->
+                    <input type="file" id="reqFile" accept=".txt,.md,.pdf,.docx,.doc" hidden />
+
                     <!-- Upload zone -->
                     <div class="upload-zone" id="uploadZone">
-                        <input type="file" id="reqFile" accept=".txt,.md,.pdf,.docx,.doc" hidden />
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                             <path d="M12 3v12M8 7l4-4 4 4" stroke="currentColor" stroke-width="1.5"
                                 stroke-linecap="round" stroke-linejoin="round" />
@@ -341,6 +343,17 @@
                 </svg>
                 <span class="run-label">Run Agent</span>
             </button>
+            <!-- Add RIGHT AFTER the runBtn closing tag -->
+<button id="rehealBtn" class="action-btn reheal-btn" hidden>
+  <svg class="run-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M13.5 2.5v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <span class="run-label">Re-run Self-Heal</span>
+  <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" style="display:none">
+    <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-dasharray="28" stroke-dashoffset="10"/>
+  </svg>
+</button>
         </div>
 
     </aside>
@@ -579,8 +592,6 @@
         <span id="toastMsg"></span>
     </div>
 
-    <script src="agent.js"></script>
-    <script src="renderer.js"></script>
     <!-- ── Chat drawer ──────────────────────────────────────── -->
     <div class="chat-backdrop" id="chatBackdrop"></div>
 

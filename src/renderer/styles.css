@@ -1899,3 +1899,27 @@ select option {
   animation: spin 0.9s linear infinite;
   color: var(--c-accent);
 }
+
+/* ── Re-run Self-Heal button ──────────────────────────────── */
+.reheal-btn {
+  background: var(--c-surface-2, #1e2130);
+  border: 1px solid var(--c-border, #2e3347);
+  color: var(--c-text-2, #a0a8c0);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.reheal-btn:hover:not(:disabled) {
+  background: var(--c-surface-3, #252a3a);
+  border-color: var(--c-accent, #7c6ff7);
+  color: var(--c-accent, #7c6ff7);
+}
+.reheal-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

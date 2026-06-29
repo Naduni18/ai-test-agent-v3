@@ -187,6 +187,8 @@ ipcMain.handle('check-session', async (_, { folderPath }) => {
 });
 
 ipcMain.handle('generate-excel', async (_, { rows }) => {
+  if (_dialogOpen) return { success: false, error: 'Dialog already open' };
+  _dialogOpen = true;
   try {
     const { filePath } = await dialog.showSaveDialog(win, {
       title:       'Save Test Cases Excel',
@@ -484,6 +486,8 @@ ipcMain.handle('generate-excel', async (_, { rows }) => {
   } catch (err) {
     console.error('Excel generation error:', err);
     return { success: false, error: err.message };
+  } finally {
+    _dialogOpen = false;
   }
 });
 

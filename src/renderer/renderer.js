@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const chatMessages = $('chatMessages');
   const chatInput    = $('chatInput');
   const chatSendBtn  = $('chatSend');
+  const rehealBtn    = $('rehealBtn');
 
   console.log('DOM ready | chatFab:', !!chatFab, '| chatDrawer:', !!chatDrawer, '| runBtn:', !!runBtn);
 
@@ -321,6 +322,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (results[0])     $('excelWrap')?.removeAttribute('hidden');
 
     updateActionButtons();
+
+    // Show re-heal button if scripts exist in the restored session
+if (results[2]) rehealBtn?.removeAttribute('hidden');
   }
 
   // ── Update session info label ──────────────────────────────
@@ -1032,6 +1036,68 @@ document.addEventListener('DOMContentLoaded', () => {
   /* ── Run Agent ────────────────────────────────────────── */
   runBtn?.addEventListener('click', startAgent);
 
+  rehealBtn?.addEventListener('click', async () => {
+  if (running) return;
+  const apiKey = getActiveApiKey();
+  if (!apiKey) { showToast('Enter your API key first'); return; }
+  if (!results[2]) { showToast('No scripts found — run the agent first'); return; }
+
+  running = true;
+  rehealBtn.disabled = true;
+  rehealBtn.querySelector('.run-label').textContent = 'Healing…';
+  rehealBtn.querySelector('.run-icon').style.display  = 'none';
+  rehealBtn.querySelector('.spin-icon').style.display = '';
+
+  setStepState(3, 'running');
+  showLoading(3);
+  switchTab(3);
+
+  try {
+    const modules = ($('modules')?.value ?? '').split('\n').map(m => m.trim()).filter(Boolean);
+    const allHealReports = [];
+
+    for (const moduleName of modules) {
+      // Extract only the scripts belonging to this module from results[2]
+      const moduleScriptSnippet = results[2]
+        .split('\n\n---\n\n')
+        .find(chunk => chunk.toLowerCase().includes(moduleName.toLowerCase()))
+        ?? results[2];
+
+      const healReport = await callClaude(apiKey,
+        `You are a test resilience engineer. Analyse Cypress specs and produce a self-healing report.
+IMPORTANT: Only flag a selector if it is genuinely broken or highly likely to break (e.g. auto-generated IDs, nth-child indexes, volatile CSS class names, deeply nested positional chains).
+Do NOT flag a selector simply because a different selector type is preferred. A stable ID, a meaningful class name, or any selector that reliably identifies the element is perfectly fine — leave it alone.
+For every genuinely broken/fragile selector output:
+STALE: <original>
+REASON: specifically why this will break (not just "not preferred")
+✓ HEALED: <better selector>
+STRATEGY: data-cy | aria | text | composite`,
+        `Module: ${moduleName}\n\nSpecs:\n${moduleScriptSnippet.substring(0, 1400)}\n\n` +
+        `Flag fragile selectors. Propose healing chain: data-cy > aria > text > CSS.`
+      );
+      allHealReports.push(`# ${moduleName}\n\n${healReport}`);
+    }
+
+    results[3] = allHealReports.join('\n\n---\n\n');
+    setStepState(3, 'done');
+    $('tab-3')?.classList.add('done');
+    renderPanel(3, results[3]);
+    showToast('✓ Self-heal re-run complete');
+    autoSaveSession();
+
+  } catch (err) {
+    setStepState(3, 'error');
+    showToast('Self-heal failed: ' + err.message);
+    console.error('Re-heal error:', err);
+  }
+
+  running = false;
+  rehealBtn.disabled = false;
+  rehealBtn.querySelector('.run-label').textContent = 'Re-run Self-Heal';
+  rehealBtn.querySelector('.run-icon').style.display  = '';
+  rehealBtn.querySelector('.spin-icon').style.display = 'none';
+});
+
   async function startAgent() {
     const apiKey = getActiveApiKey();
     const baseUrl = $('baseUrl')?.value.trim() ?? '';
@@ -1051,6 +1117,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (running)        return;
 
     running = true;
+
+    // Disable immediately — BEFORE any await — so a second click while the
+    // folder-picker dialog is open cannot trigger another pickFolder call.
+    if (runBtn)   runBtn.disabled        = true;
+    if (runLabel) runLabel.textContent   = 'Running…';
+    if (runIcon)  runIcon.style.display  = 'none';
+    if (spinIcon) spinIcon.style.display = '';
+
     results = { 0: null, 1: null, 2: null, 3: null };
 
     // Reset UI panels
@@ -1063,10 +1137,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     if (copyBtn)  copyBtn.disabled  = true;
     if (saveBtn)  saveBtn.disabled  = true;
-    if (runBtn)   runBtn.disabled   = true;
-    if (runLabel) runLabel.textContent   = 'Running…';
-    if (runIcon)  runIcon.style.display  = 'none';
-    if (spinIcon) spinIcon.style.display = '';
     progressWrap?.removeAttribute('hidden');
     setProgress(0, 'Starting…');
 
@@ -1137,6 +1207,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Show Excel download button now that test cases exist
       $('excelWrap')?.removeAttribute('hidden');
+      rehealBtn?.removeAttribute('hidden');   // ← ADD THIS LINE
 
       // Enable save button and auto-save if folder already chosen
       if (saveSessionBtn) saveSessionBtn.disabled = false;
@@ -1197,7 +1268,7 @@ STRICT RULES:
 - Never put base URL or module name as a test case
 - Each field label (Preconditions, Steps, Expected Result, Priority) must be on its own line
 - Separate each test case with exactly one blank line
-- Generate maximum 50 test cases`,
+- Generate maximum 100 test cases per module, but fewer is fine if requirements are limited`,
       `Module: ${moduleName}\n\nRequirements:\n${req}\n\nBase URL: ${baseUrl}\n\n` +
       `Generate test cases for the "${moduleName}" module ONLY.`
     );
@@ -1243,9 +1314,11 @@ file content here
     log('Healing locators…');
     const healReport = await callClaude(apiKey,
       `You are a test resilience engineer. Analyse Cypress specs and produce a self-healing report.
-For every fragile selector output:
+IMPORTANT: Only flag a selector if it is genuinely broken or highly likely to break (e.g. auto-generated IDs, nth-child indexes, volatile CSS class names, deeply nested positional chains).
+Do NOT flag a selector simply because a different selector type is preferred. A stable ID, a meaningful class name, or any selector that reliably identifies the element is perfectly fine — leave it alone.
+For every genuinely broken/fragile selector output:
 STALE: <original>
-REASON: why fragile
+REASON: specifically why this will break (not just "not preferred")
 ✓ HEALED: <better selector>
 STRATEGY: data-cy | aria | text | composite`,
       `Module: ${moduleName}\n\nSpecs:\n${scripts.substring(0, 1400)}\n\n` +
@@ -1277,6 +1350,255 @@ STRATEGY: data-cy | aria | text | composite`,
     setProgress(base + step, `✓ ${moduleName} complete`);
   }
 
+/* ── Build AI failure analyzer files (injected into every framework) ── */
+  function buildAnalyzerFiles(baseUrl) {
+    const analyzerScript = `const fs   = require('fs');
+const path = require('path');
+
+// ── Config ────────────────────────────────────────────────────────────────
+const RESULTS_PATH = path.join(__dirname, '../cypress/reports/results.json');
+const REPORT_PATH  = path.join(__dirname, '../cypress/reports/failure-analysis.md');
+const API_KEY      = process.env.ANTHROPIC_API_KEY || process.env.API_KEY || '';
+const MODEL        = process.env.ANALYZER_MODEL    || 'claude-sonnet-4-6';
+
+if (!API_KEY) {
+  console.error('\\n❌  ANTHROPIC_API_KEY is not set. Export it and retry.\\n');
+  process.exit(1);
+}
+
+// ── Load results ──────────────────────────────────────────────────────────
+if (!fs.existsSync(RESULTS_PATH)) {
+  console.error('\\n❌  No results file found at', RESULTS_PATH);
+  console.error('    Run Cypress first: npx cypress run\\n');
+  process.exit(1);
+}
+
+const raw     = fs.readFileSync(RESULTS_PATH, 'utf8');
+const results = JSON.parse(raw);
+
+// ── Extract failures ──────────────────────────────────────────────────────
+const failures = [];
+(results.results || results.suites || []).forEach(suite => {
+  const specs = suite.tests || suite.specs || [];
+  specs.forEach(test => {
+    const tests = test.tests || [test];
+    tests.forEach(t => {
+      if (t.state === 'failed' || t.pass === false) {
+        failures.push({
+          suite: suite.fullFile || suite.file || suite.title || 'Unknown Suite',
+          title: t.fullTitle || t.title || 'Unknown Test',
+          error: (t.err && (t.err.message || t.err.estack)) || t.displayError || 'No error message'
+        });
+      }
+    });
+  });
+});
+
+if (failures.length === 0) {
+  console.log('\\n✅  No failures found in results — nothing to analyze.\\n');
+  process.exit(0);
+}
+
+console.log(\`\\n🔍  Found \${failures.length} failure(s). Sending to AI for analysis…\\n\`);
+
+// ── Build prompt ──────────────────────────────────────────────────────────
+const failureText = failures.map((f, i) =>
+  \`### Failure \${i + 1}\\nFile: \${f.suite}\\nTest: \${f.title}\\nError:\\n\${f.error}\`
+).join('\\n\\n');
+
+const prompt = \`You are a senior QA engineer and test automation expert.
+Analyze these Cypress test failures and for each one provide:
+
+1. ROOT CAUSE — the exact technical reason it failed (selector issue, timing, network, assertion mismatch, config error, etc.)
+2. CATEGORY — one of: Selector | Timing | Network | Assertion | Config | Data | Environment | Unknown
+3. FIX — a concrete code fix or actionable step (include corrected code where applicable)
+4. PREVENTION — how to prevent this class of failure in future
+
+Be concise and technical. Do not repeat the error verbatim — explain what it means.
+
+---
+
+\${failureText}\`;
+
+// ── Call Anthropic API ────────────────────────────────────────────────────
+async function analyze() {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:  'POST',
+    headers: {
+      'Content-Type':      'application/json',
+      'x-api-key':         API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model:      MODEL,
+      max_tokens: 4000,
+      messages:   [{ role: 'user', content: prompt }]
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(\`Anthropic API error \${res.status}: \${err}\`);
+  }
+
+  const data     = await res.json();
+  const analysis = data.content.map(b => b.text || '').join('');
+
+  // ── Write report ────────────────────────────────────────────────────────
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const report = \`# AI Failure Analysis Report
+Generated: \${timestamp}
+Model: \${MODEL}
+Failures analyzed: \${failures.length}
+
+---
+
+\${analysis}
+
+---
+
+## Raw Failures Summary
+
+\${failures.map((f, i) => \`**\${i+1}. \${f.title}**  \\nFile: \`+\`\${f.suite}  \\nError: \${f.error.split('\\n')[0]}\`).join('\\n\\n')}
+\`;
+
+  fs.mkdirSync(path.dirname(REPORT_PATH), { recursive: true });
+  fs.writeFileSync(REPORT_PATH, report, 'utf8');
+  console.log(\`\\n✅  Analysis complete → \${REPORT_PATH}\\n\`);
+  console.log(analysis.substring(0, 800) + (analysis.length > 800 ? '\\n…(see full report)' : ''));
+}
+
+analyze().catch(err => {
+  console.error('\\n❌  Analysis failed:', err.message, '\\n');
+  process.exit(1);
+});
+`;
+
+    const localShell = `#!/usr/bin/env bash
+# ── AI Failure Analyzer — local runner ──────────────────────────────────────
+# Usage:  bash scripts/analyze-failures-local.sh
+# Prereq: export ANTHROPIC_API_KEY=sk-ant-...
+
+set -e
+
+echo ""
+echo "🤖  AI Root Cause Analyzer"
+echo "───────────────────────────"
+
+if [ -z "\${ANTHROPIC_API_KEY}" ]; then
+  echo "❌  ANTHROPIC_API_KEY is not set."
+  echo "    Run:  export ANTHROPIC_API_KEY=sk-ant-your-key"
+  echo ""
+  exit 1
+fi
+
+# Run Cypress if no results file exists yet
+RESULTS="cypress/reports/results.json"
+if [ ! -f "\$RESULTS" ]; then
+  echo "📋  No results.json found — running Cypress first…"
+  echo ""
+  npx cypress run --reporter json --reporter-options "output=\$RESULTS" || true
+fi
+
+echo ""
+echo "🔍  Analyzing failures…"
+node scripts/analyze-failures.js
+
+echo ""
+echo "📄  Report saved to cypress/reports/failure-analysis.md"
+echo ""
+`;
+
+    const githubWorkflow = `name: Cypress + AI Failure Analysis
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:          # allow manual trigger from GitHub UI
+
+jobs:
+  cypress-and-analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create reports directory
+        run: mkdir -p cypress/reports
+
+      - name: Run Cypress tests
+        id: cypress
+        run: |
+          npx cypress run \\
+            --reporter json \\
+            --reporter-options "output=cypress/reports/results.json" || true
+        env:
+          CYPRESS_BASE_URL: \${{ vars.BASE_URL || '${baseUrl}' }}
+          CYPRESS_USERNAME: \${{ secrets.CYPRESS_USERNAME }}
+          CYPRESS_PASSWORD: \${{ secrets.CYPRESS_PASSWORD }}
+
+      - name: Run AI Failure Analyzer
+        if: always()
+        run: node scripts/analyze-failures.js
+        env:
+          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+          ANALYZER_MODEL: claude-sonnet-4-6
+
+      - name: Upload reports as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-ai-reports
+          path: |
+            cypress/reports/results.json
+            cypress/reports/failure-analysis.md
+            cypress/screenshots/
+            cypress/videos/
+          retention-days: 14
+
+      - name: Comment analysis on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'cypress/reports/failure-analysis.md';
+            if (!fs.existsSync(reportPath)) {
+              console.log('No failure analysis report found — all tests passed.');
+              return;
+            }
+            const report = fs.readFileSync(reportPath, 'utf8');
+            const body = report.length > 65000
+              ? report.substring(0, 65000) + '\\n\\n_(report truncated — download artifact for full analysis)_'
+              : report;
+            await github.rest.issues.createComment({
+              owner:    context.repo.owner,
+              repo:     context.repo.repo,
+              issue_number: context.issue.number,
+              body: '## 🤖 AI Failure Analysis\\n\\n' + body
+            });
+`;
+
+    return [
+      `===FILE: scripts/analyze-failures.js===\n${analyzerScript}\n===ENDFILE===`,
+      `===FILE: scripts/analyze-failures-local.sh===\n${localShell}\n===ENDFILE===`,
+      `===FILE: .github/workflows/ai-failure-analysis.yml===\n${githubWorkflow}\n===ENDFILE===`
+    ].join('\n\n');
+  }
+
   /* ── Generate shared project files (runs once) ──────────── */
   async function generateSharedFiles(apiKey, baseUrl, folderPath) {
     setProgress(0, 'Generating shared project files…');
@@ -1290,17 +1612,22 @@ file content here
 ===ENDFILE===`,
       `Base URL: ${baseUrl}
 
-Output ONLY these 6 shared project-level files:
+Output ONLY these files. No extra commentary outside the markers.
+
 1. package.json — include cypress@13, @faker-js/faker, cypress-axe, dotenv
-2. cypress.config.js — baseUrl set to ${baseUrl}, retries:2, video:false, specPattern: cypress/e2e/**/*.cy.js
+2. cypress.config.js — baseUrl set to ${baseUrl}, retries:2, video:false, specPattern: cypress/e2e/**/*.cy.js, reporter: json with output to cypress/reports/results.json
 3. cypress/support/e2e.js — global hooks, import commands, axe setup
 4. cypress/support/commands.js — cy.login(), cy.apiRequest(), cy.healLocator()
 5. cypress/utils/selfHeal.js — healing chain: data-cy > aria-label > text > CSS > positional, logs which succeeded
-6. .env.example — BASE_URL, USERNAME, PASSWORD, API_KEY vars
-7. README.md — setup steps: npm install, npx cypress open, env setup, folder structure explanation`
+6. .env.example — BASE_URL, USERNAME, PASSWORD, API_KEY, ANTHROPIC_API_KEY vars
+7. README.md — setup steps: npm install, npx cypress open, env setup, folder structure, and a section explaining AI Failure Analyzer usage`
     );
 
-    const files = parseFrameworkFiles(sharedConfig);
+    // ── Append AI failure analyzer files (static, not AI-generated) ──────
+    const analyzerFiles = buildAnalyzerFiles(baseUrl);
+    const sharedWithAnalyzer = sharedConfig + '\n' + analyzerFiles;
+
+    const files = parseFrameworkFiles(sharedWithAnalyzer);
     console.log('Shared files parsed:', files.map(f => f.name));
 
     if (folderPath && window.electronAPI?.writeFiles && files.length > 0) {
@@ -1309,7 +1636,7 @@ Output ONLY these 6 shared project-level files:
       showToast(`✓ Shared config files written (${r.count} files)`);
     }
 
-    return sharedConfig;
+    return sharedWithAnalyzer;
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -1837,10 +2164,12 @@ file content here
       // Re-run self-heal on new scripts
       setStepState(3, 'running');
       const healReport = await callClaude(apiKey,
-        `You are a test resilience engineer. Analyse Cypress specs and produce a self-healing report.
-For every fragile selector output:
+       `You are a test resilience engineer. Analyse Cypress specs and produce a self-healing report.
+IMPORTANT: Only flag a selector if it is genuinely broken or highly likely to break (e.g. auto-generated IDs, nth-child indexes, volatile CSS class names, deeply nested positional chains).
+Do NOT flag a selector simply because a different selector type is preferred. A stable ID, a meaningful class name, or any selector that reliably identifies the element is perfectly fine — leave it alone.
+For every genuinely broken/fragile selector output:
 STALE: <original>
-REASON: why fragile
+REASON: specifically why this will break (not just "not preferred")
 ✓ HEALED: <better selector>
 STRATEGY: data-cy | aria | text | composite`,
         `Specs:\n${combinedScripts.substring(0, 1400)}\n\n` +
