@@ -46,25 +46,143 @@
             <section class="config-section">
                 <h2 class="section-label">Configuration</h2>
 
+                <!-- ── Provider picker ──────────────────────────────────── -->
                 <div class="field">
-                    <label for="apiKey" class="field-label">
+                    <label class="field-label">
                         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <path d="M11 1a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM7.22 9.78 2 15" stroke="currentColor"
-                                stroke-width="1.5" stroke-linecap="round" />
-                            <path d="M4 13l1.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                            <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" />
+                            <path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
+                                stroke-linejoin="round" />
                         </svg>
-                        Claude API Key
+                        AI Provider
                     </label>
-                    <div class="input-wrap">
-                        <input type="password" id="apiKey" class="field-input" placeholder="sk-ant-api03-…"
-                            autocomplete="off" spellcheck="false" />
-                        <button class="input-toggle" id="toggleKey" aria-label="Show API key" tabindex="-1">
-                            <svg id="eyeIcon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor"
-                                    stroke-width="1.3" />
-                                <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" />
+                    <div class="provider-tabs" id="providerTabs">
+                        <button class="provider-tab active" data-provider="anthropic" id="tabAnthropic">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M12 2L2 19h20L12 2z" stroke="currentColor" stroke-width="1.6"
+                                    stroke-linejoin="round" />
+                                <path d="M12 8v6M12 17v.5" stroke="currentColor" stroke-width="1.6"
+                                    stroke-linecap="round" />
                             </svg>
+                            Claude
                         </button>
+                        <button class="provider-tab" data-provider="openai" id="tabOpenAI">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.6" />
+                                <path d="M8 12a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.6"
+                                    stroke-linecap="round" />
+                                <circle cx="12" cy="15" r="1.5" fill="currentColor" />
+                            </svg>
+                            OpenAI
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ── Claude / Anthropic fields ────────────────────────── -->
+                <div class="provider-section" id="sectionAnthropic">
+                    <div class="field">
+                        <label for="apiKey" class="field-label">
+                            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                <path d="M11 1a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM7.22 9.78 2 15" stroke="currentColor"
+                                    stroke-width="1.5" stroke-linecap="round" />
+                                <path d="M4 13l1.5 1.5" stroke="currentColor" stroke-width="1.5"
+                                    stroke-linecap="round" />
+                            </svg>
+                            Anthropic API Key
+                        </label>
+                        <div class="input-wrap">
+                            <input type="password" id="apiKey" class="field-input" placeholder="sk-ant-api03-…"
+                                autocomplete="off" spellcheck="false" />
+                            <button class="input-toggle" id="toggleKey" aria-label="Show key" tabindex="-1">
+                                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                    <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor"
+                                        stroke-width="1.3" />
+                                    <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="claudeModel" class="field-label">
+                            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                <rect x="1" y="4" width="14" height="8" rx="2" stroke="currentColor"
+                                    stroke-width="1.3" />
+                                <path d="M4 8h8M4 10h5" stroke="currentColor" stroke-width="1.3"
+                                    stroke-linecap="round" />
+                            </svg>
+                            Model
+                        </label>
+                        <select id="claudeModel" class="field-input">
+                            <optgroup label="Claude 4">
+                                <option value="claude-opus-4-6">Claude Opus 4.6 (most capable)</option>
+                                <option value="claude-sonnet-4-6" selected>Claude Sonnet 4.6 (recommended)</option>
+                            </optgroup>
+                            <optgroup label="Claude 3.7">
+                                <option value="claude-sonnet-3-7">Claude Sonnet 3.7</option>
+                            </optgroup>
+                            <optgroup label="Claude 3.5">
+                                <option value="claude-sonnet-3-5">Claude Sonnet 3.5</option>
+                                <option value="claude-haiku-3-5">Claude Haiku 3.5 (fastest)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div class="model-hint" id="claudeModelHint">
+                        <span id="claudeModelDesc">Best balance of speed and quality</span>
+                    </div>
+                    <div class="provider-hint">
+                        Get your key at
+                        <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer"
+                            class="provider-link">console.anthropic.com</a>
+                    </div>
+                </div>
+
+                <!-- ── OpenAI fields ─────────────────────────────────────── -->
+                <div class="provider-section" id="sectionOpenAI" hidden>
+                    <div class="field">
+                        <label for="openaiKey" class="field-label">
+                            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                <path d="M11 1a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM7.22 9.78 2 15" stroke="currentColor"
+                                    stroke-width="1.5" stroke-linecap="round" />
+                                <path d="M4 13l1.5 1.5" stroke="currentColor" stroke-width="1.5"
+                                    stroke-linecap="round" />
+                            </svg>
+                            OpenAI API Key
+                        </label>
+                        <div class="input-wrap">
+                            <input type="password" id="openaiKey" class="field-input" placeholder="sk-proj-…"
+                                autocomplete="off" spellcheck="false" />
+                            <button class="input-toggle" id="toggleOpenAIKey" aria-label="Show key" tabindex="-1">
+                                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                    <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor"
+                                        stroke-width="1.3" />
+                                    <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="openaiModel" class="field-label">
+                            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                <rect x="1" y="4" width="14" height="8" rx="2" stroke="currentColor"
+                                    stroke-width="1.3" />
+                                <path d="M4 8h8M4 10h5" stroke="currentColor" stroke-width="1.3"
+                                    stroke-linecap="round" />
+                            </svg>
+                            Model
+                        </label>
+                        <select id="openaiModel" class="field-input">
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gpt-4o-mini">gpt-4o-mini (faster)</option>
+                            <option value="gpt-4-turbo">gpt-4-turbo</option>
+                            <option value="gpt-4">gpt-4</option>
+                            <option value="o1-preview">o1-preview</option>
+                            <option value="o1-mini">o1-mini</option>
+                        </select>
+                    </div>
+                    <div class="provider-hint">
+                        Get your key at
+                        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer"
+                            class="provider-link openai">platform.openai.com</a>
                     </div>
                 </div>
 
@@ -265,6 +383,16 @@
             </nav>
 
             <div class="topbar-actions">
+                <button class="action-btn" id="selectTCBtn" title="Select test cases to automate" disabled>
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M2 4h12M2 8h8M2 12h5" stroke="currentColor" stroke-width="1.4"
+                            stroke-linecap="round" />
+                        <circle cx="13" cy="12" r="2.5" stroke="currentColor" stroke-width="1.3" />
+                        <path d="M12 12l.8.8 1.5-1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
+                            stroke-linejoin="round" />
+                    </svg>
+                    Select TCs
+                </button>
                 <button class="action-btn" id="copyBtn" title="Copy output" disabled>
                     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3" />
@@ -287,7 +415,7 @@
                         <path d="M2 11v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3M8 1v8M5 6l3 3 3-3" stroke="currentColor"
                             stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
-                    Extract Files
+                    Extract Framework
                 </button>
             </div>
         </header>
@@ -364,6 +492,85 @@
             </div>
 
         </div><!-- /panels -->
+
+        <!-- ── TC Selection Drawer ─────────────────────────────────── -->
+        <div class="tc-select-backdrop" id="tcSelectBackdrop"></div>
+
+        <div class="tc-select-drawer" id="tcSelectDrawer" aria-label="Select test cases to automate">
+
+            <div class="tc-select-header">
+                <div class="tc-select-title">
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M2 4h12M2 8h8M2 12h5" stroke="currentColor" stroke-width="1.4"
+                            stroke-linecap="round" />
+                        <circle cx="13" cy="12" r="2.5" stroke="currentColor" stroke-width="1.3" />
+                        <path d="M12 12l.8.8 1.5-1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
+                            stroke-linejoin="round" />
+                    </svg>
+                    Select Test Cases to Automate
+                </div>
+                <button class="tc-select-close" id="tcSelectClose" aria-label="Close">
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="tc-select-toolbar">
+                <div class="tc-select-search-wrap">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.3" />
+                        <path d="M10.5 10.5l3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                    </svg>
+                    <input type="text" id="tcSearchInput" class="tc-search-input" placeholder="Search test cases…" />
+                </div>
+                <div class="tc-filter-tabs" id="tcFilterTabs">
+                    <button class="tc-filter-tab active" data-filter="all">All</button>
+                    <button class="tc-filter-tab" data-filter="UI">UI</button>
+                    <button class="tc-filter-tab" data-filter="API">API</button>
+                    <button class="tc-filter-tab" data-filter="High">High</button>
+                </div>
+            </div>
+
+            <!-- Auto-select bar -->
+            <div class="tc-auto-bar">
+                <span class="tc-auto-label">Auto-select:</span>
+                <button class="tc-auto-btn" id="autoSelectAll">All</button>
+                <button class="tc-auto-btn" id="autoSelectHigh">High Priority</button>
+                <button class="tc-auto-btn" id="autoSelectUI">UI Only</button>
+                <button class="tc-auto-btn" id="autoSelectAPI">API Only</button>
+                <button class="tc-auto-btn" id="autoSelectAI">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M8 2l1.5 3.5L13 7l-3.5 1.5L8 12l-1.5-3.5L3 7l3.5-1.5L8 2z" fill="currentColor" />
+                    </svg>
+                    AI Pick
+                </button>
+                <button class="tc-auto-btn danger" id="autoSelectNone">None</button>
+            </div>
+
+            <!-- Module tabs -->
+            <div class="tc-module-tabs" id="tcModuleTabs"></div>
+
+            <!-- TC list -->
+            <div class="tc-select-list" id="tcSelectList"></div>
+
+            <!-- Footer -->
+            <div class="tc-select-footer">
+                <div class="tc-select-stats" id="tcSelectStats">0 selected</div>
+                <div style="display:flex;gap:8px">
+                    <button class="tc-select-cancel" id="tcSelectCancel">Cancel</button>
+                    <button class="tc-select-confirm" id="tcSelectConfirm">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M3 8l4 4 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                                stroke-linejoin="round" />
+                        </svg>
+                        Automate Selected
+                    </button>
+                </div>
+            </div>
+
+        </div>
 
     </main>
 

@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let results     = { 0: null, 1: null, 2: null, 3: null };
   let running     = false;
   let chatHistory = [];
+  let agentFolderPath = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -36,6 +37,71 @@ document.addEventListener('DOMContentLoaded', () => {
   $('toggleKey')?.addEventListener('click', () => {
     if (apiKeyInput) apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
   });
+
+  /* ── Provider switching ───────────────────────────────────── */
+  let activeProvider = 'anthropic';
+
+  document.querySelectorAll('.provider-tab').forEach(btn => {
+    btn.addEventListener('click', () => switchProvider(btn.dataset.provider));
+  });
+
+  $('toggleOpenAIKey')?.addEventListener('click', () => {
+    const input = $('openaiKey');
+    if (input) input.type = input.type === 'password' ? 'text' : 'password';
+  });
+
+  function switchProvider(provider) {
+    activeProvider = provider;
+
+    // Update tab styles
+    document.querySelectorAll('.provider-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.provider === provider);
+    });
+
+    // Show/hide sections
+    $('sectionAnthropic')?.toggleAttribute('hidden', provider !== 'anthropic');
+    $('sectionOpenAI')?.toggleAttribute  ('hidden', provider !== 'openai');
+
+    // Update provider badge in topbar if it exists
+    const badge = $('providerBadge');
+    if (badge) {
+      badge.className  = `provider-badge ${provider}`;
+      badge.textContent = provider === 'anthropic' ? '⬡ Claude' : '◎ OpenAI';
+    }
+
+    console.log('Provider switched to:', provider);
+  }
+
+/* ── Claude model selector ────────────────────────────────── */
+  const claudeModelSelect = $('claudeModel');
+  const claudeModelDesc   = $('claudeModelDesc');
+
+  const MODEL_DESCRIPTIONS = {
+    'claude-opus-4-6':    'Most capable — best for complex frameworks',
+    'claude-sonnet-4-6':  'Best balance of speed and quality',
+    'claude-sonnet-3-7':  'Strong reasoning and code generation',
+    'claude-sonnet-3-5':  'Fast and capable for most tasks',
+    'claude-haiku-3-5':   'Fastest — best for simple test cases',
+  };
+
+  claudeModelSelect?.addEventListener('change', () => {
+    const model = claudeModelSelect.value;
+    if (claudeModelDesc) {
+      claudeModelDesc.textContent = MODEL_DESCRIPTIONS[model] || '';
+    }
+    console.log('Claude model selected:', model);
+  });
+
+  function getClaudeModel() {
+    return claudeModelSelect?.value || 'claude-sonnet-4-6';
+  }
+
+  function getActiveApiKey() {
+    if (activeProvider === 'openai') {
+      return $('openaiKey')?.value.trim() ?? '';
+    }
+    return apiKeyInput?.value.trim() ?? '';
+  }
 
   reqDoc?.addEventListener('input', () => {
     const n = reqDoc.value.length;
@@ -440,6 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else                renderCodeBlock(content, text, idx);
     if (activeTab === idx) updateActionButtons();
     if (idx === 1) $('extractBtn') && ($('extractBtn').disabled = false);
+    if (idx === 0) enableTCSelectBtn();
   }
 
   function escHtml(s) {
@@ -570,8 +637,14 @@ document.addEventListener('DOMContentLoaded', () => {
   async function saveFrameworkToDisk() {
     if (!results[1]) { showToast('Run the agent first'); return; }
     if (!window.electronAPI?.pickFolder) { showToast('Only works in the desktop app'); return; }
-    const folderPath = await window.electronAPI.pickFolder();
-    if (!folderPath) return;
+
+    // Reuse folder from agent run — only ask if not already set
+    let folderPath = agentFolderPath;
+    if (!folderPath) {
+      folderPath = await window.electronAPI.pickFolder();
+      if (!folderPath) return;
+      agentFolderPath = folderPath;
+    }
     const allFiles = [], seen = new Set();
     const add = (parsed) => parsed.forEach(f => { if (!seen.has(f.name)) { seen.add(f.name); allFiles.push(f); } });
     if (results[1]) add(parseFrameworkFiles(results[1]));
@@ -860,30 +933,47 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* ── Claude API ───────────────────────────────────────── */
-  async function callClaude(apiKey, system, user, messages) {
+ async function callClaude(apiKey, system, user, messages) {
+    // Route to the correct provider
+    if (activeProvider === 'openai') {
+      return callOpenAI(apiKey, system, user, messages);
+    }
+    return callAnthropic(apiKey, system, user, messages);
+  }
+
+  /* ── Anthropic / Claude ───────────────────────────────────── */
+  async function callAnthropic(apiKey, system, user, messages) {
     if (window.electronAPI?.callClaude) {
       const userContent = messages
-        ? messages.map(m => `${m.role === 'user' ? 'USER' : 'ASSISTANT'}: ${m.content}`).join('\n\n---\n\n')
+        ? messages.map(m =>
+            `${m.role === 'user' ? 'USER' : 'ASSISTANT'}: ${m.content}`
+          ).join('\n\n---\n\n')
         : user;
-      return window.electronAPI.callClaude({ apiKey, system, user: userContent });
+     return window.electronAPI.callClaude({
+        apiKey, system, user: userContent,
+        provider: 'anthropic',
+        model:    getClaudeModel()
+      });
     }
+
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        'Content-Type':      'application/json',
-        'x-api-key':         apiKey,
-        'anthropic-version': '2023-06-01',
+        'Content-Type':       'application/json',
+        'x-api-key':          apiKey,
+        'anthropic-version':  '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify({
-        model:      'claude-sonnet-4-6',
+     body: JSON.stringify({
+        model:      getClaudeModel(),
         max_tokens: 8000,
         system,
         messages:   messages ?? [{ role: 'user', content: user }]
       })
     });
+
     if (!res.ok) {
-      let msg = `API error ${res.status}`;
+      let msg = `Anthropic API error ${res.status}`;
       try { msg = (await res.json())?.error?.message ?? msg; } catch (_) {}
       throw new Error(msg);
     }
@@ -893,17 +983,68 @@ document.addEventListener('DOMContentLoaded', () => {
     return data.content.map(b => b.text || '').join('');
   }
 
+  /* ── OpenAI ───────────────────────────────────────────────── */
+  async function callOpenAI(apiKey, system, user, messages) {
+    const model = $('openaiModel')?.value || 'gpt-4o';
+
+    if (window.electronAPI?.callClaude) {
+      const userContent = messages
+        ? messages.map(m =>
+            `${m.role === 'user' ? 'USER' : 'ASSISTANT'}: ${m.content}`
+          ).join('\n\n---\n\n')
+        : user;
+      return window.electronAPI.callClaude({
+        apiKey, system, user: userContent, provider: 'openai', model
+      });
+    }
+
+    // Build messages array for OpenAI format
+    const openaiMessages = [
+      { role: 'system', content: system },
+      ...(messages ?? [{ role: 'user', content: user }])
+    ];
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 8000,
+        messages:   openaiMessages
+      })
+    });
+
+    if (!res.ok) {
+      let msg = `OpenAI API error ${res.status}`;
+      try { msg = (await res.json())?.error?.message ?? msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) throw new Error('Empty response from OpenAI');
+    return text;
+  }
+
   /* ── Run Agent ────────────────────────────────────────── */
   runBtn?.addEventListener('click', startAgent);
 
   async function startAgent() {
-    const apiKey  = apiKeyInput?.value.trim() ?? '';
+    const apiKey = getActiveApiKey();
     const baseUrl = $('baseUrl')?.value.trim() ?? '';
     const req = getRequirementsText();
     const moduleText = $('modules')?.value ?? '';
     const modules = moduleText.split('\n').map(m => m.trim()).filter(Boolean);
 
-    if (!apiKey)        { showToast('Enter your Claude API key');        return; }
+    if (!apiKey) {
+      showToast(activeProvider === 'openai'
+        ? 'Enter your OpenAI API key'
+        : 'Enter your Anthropic API key');
+      return;
+    }
     if (!baseUrl)       { showToast('Enter the application base URL');   return; }
     if (!req) { showToast('Upload a requirements file or paste requirements'); return; }
     if (!modules.length){ showToast('Enter at least one module name');   return; }
@@ -947,6 +1088,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (spinIcon) spinIcon.style.display = 'none';
         return;
       }
+      agentFolderPath = folderPath;   // ← save for Extract Files to reuse
     }
 
     try {
@@ -1279,10 +1421,15 @@ Output ONLY these 6 shared project-level files:
 
   async function sendChatMessage() {
     const text   = chatInput?.value.trim();
-    const apiKey = apiKeyInput?.value.trim() ?? '';
+    const apiKey = getActiveApiKey();
     console.log('sendChatMessage | text:', text?.substring(0,30), '| apiKey set:', !!apiKey);
     if (!text)   { showToast('Type a message first'); return; }
-    if (!apiKey) { showToast('Enter your Claude API key in the sidebar'); return; }
+    if (!apiKey) {
+      showToast(activeProvider === 'openai'
+        ? 'Enter your OpenAI API key in the sidebar'
+        : 'Enter your Anthropic API key in the sidebar');
+      return;
+    }
     if (chatInput)   { chatInput.value = ''; chatInput.style.height = 'auto'; }
     if (chatSendBtn) chatSendBtn.disabled = true;
     appendChatMessage('user', text);
@@ -1322,8 +1469,13 @@ Output ONLY these 6 shared project-level files:
       showToast(`${fixed.length} file(s) copied to clipboard`);
       return;
     }
-    const folderPath = await window.electronAPI.pickFolder();
-    if (!folderPath) return;
+    // Reuse agent folder — only ask if not already set
+    let folderPath = agentFolderPath;
+    if (!folderPath) {
+      folderPath = await window.electronAPI.pickFolder();
+      if (!folderPath) return;
+      agentFolderPath = folderPath;
+    }
     try {
       const r = await window.electronAPI.writeFiles({ folderPath, allFiles: fixed });
       showToast(`✓ ${r.count} fixed file${r.count === 1 ? '' : 's'} saved`);
@@ -1331,5 +1483,384 @@ Output ONLY these 6 shared project-level files:
   }
 
   console.log('renderer.js fully initialised ✓');
+
+  /* ══════════════════════════════════════════════════════════
+     TC SELECTION SYSTEM
+     ══════════════════════════════════════════════════════════ */
+
+  let tcSelectOpen       = false;
+  let allParsedTCs       = [];      // all TCs across modules
+  let selectedTCIds      = new Set(); // IDs of selected TCs
+  let aiRecommendedIds   = new Set(); // IDs AI recommended
+  let activeModuleFilter = 'all';
+  let activeTypeFilter   = 'all';
+  let tcSearchQuery      = '';
+
+  const tcSelectDrawer   = $('tcSelectDrawer');
+  const tcSelectBackdrop = $('tcSelectBackdrop');
+  const tcSelectBtn      = $('selectTCBtn');
+  const tcSelectClose    = $('tcSelectClose');
+  const tcSelectCancel   = $('tcSelectCancel');
+  const tcSelectConfirm  = $('tcSelectConfirm');
+  const tcSelectList     = $('tcSelectList');
+  const tcSelectStats    = $('tcSelectStats');
+  const tcModuleTabs     = $('tcModuleTabs');
+  const tcSearchInput    = $('tcSearchInput');
+
+  // ── Open / close ───────────────────────────────────────────
+  function openTCSelect() {
+    if (!results[0]) { showToast('Run the agent first to generate test cases'); return; }
+    allParsedTCs     = parseTestCasesToRows(results[0]);
+    if (!allParsedTCs.length) { showToast('No test cases found to select'); return; }
+
+    // Pre-select all if nothing selected yet
+    if (selectedTCIds.size === 0) {
+      allParsedTCs.forEach(tc => selectedTCIds.add(tc['ID']));
+    }
+
+    buildModuleTabs();
+    renderTCSelectList();
+    tcSelectDrawer?.classList.add('open');
+    tcSelectBackdrop?.classList.add('visible');
+    tcSelectOpen = true;
+  }
+
+  function closeTCSelect() {
+    tcSelectDrawer?.classList.remove('open');
+    tcSelectBackdrop?.classList.remove('visible');
+    tcSelectOpen = false;
+  }
+
+  tcSelectBtn?.addEventListener('click',    openTCSelect);
+  tcSelectClose?.addEventListener('click',  closeTCSelect);
+  tcSelectCancel?.addEventListener('click', closeTCSelect);
+  tcSelectBackdrop?.addEventListener('click', closeTCSelect);
+
+  // Enable the button when test cases are available
+  function enableTCSelectBtn() {
+    if (tcSelectBtn) tcSelectBtn.disabled = false;
+  }
+
+  // ── Build module tabs ───────────────────────────────────────
+  function buildModuleTabs() {
+    if (!tcModuleTabs) return;
+
+    // Extract unique modules from IDs or module field
+    const modules = ['all', ...new Set(allParsedTCs.map(tc => tc['Module'] || 'General'))];
+    tcModuleTabs.innerHTML = '';
+
+    modules.forEach(mod => {
+      const btn = document.createElement('button');
+      btn.className   = 'tc-module-tab' + (mod === activeModuleFilter ? ' active' : '');
+      btn.textContent = mod === 'all' ? 'All Modules' : mod;
+      btn.addEventListener('click', () => {
+        activeModuleFilter = mod;
+        tcModuleTabs.querySelectorAll('.tc-module-tab').forEach(b =>
+          b.classList.toggle('active', b.textContent === (mod === 'all' ? 'All Modules' : mod))
+        );
+        renderTCSelectList();
+      });
+      tcModuleTabs.appendChild(btn);
+    });
+  }
+
+  // ── Filter tabs ─────────────────────────────────────────────
+  document.querySelectorAll('.tc-filter-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeTypeFilter = btn.dataset.filter;
+      document.querySelectorAll('.tc-filter-tab').forEach(b =>
+        b.classList.toggle('active', b === btn)
+      );
+      renderTCSelectList();
+    });
+  });
+
+  // ── Search ──────────────────────────────────────────────────
+  tcSearchInput?.addEventListener('input', () => {
+    tcSearchQuery = tcSearchInput.value.toLowerCase();
+    renderTCSelectList();
+  });
+
+  // ── Auto-select buttons ─────────────────────────────────────
+  $('autoSelectAll')?.addEventListener('click', () => {
+    getFilteredTCs().forEach(tc => selectedTCIds.add(tc['ID']));
+    renderTCSelectList();
+  });
+
+  $('autoSelectNone')?.addEventListener('click', () => {
+    getFilteredTCs().forEach(tc => selectedTCIds.delete(tc['ID']));
+    renderTCSelectList();
+  });
+
+  $('autoSelectHigh')?.addEventListener('click', () => {
+    getFilteredTCs()
+      .filter(tc => tc['Priority'] === 'High')
+      .forEach(tc => selectedTCIds.add(tc['ID']));
+    renderTCSelectList();
+  });
+
+  $('autoSelectUI')?.addEventListener('click', () => {
+    getFilteredTCs()
+      .filter(tc => tc['Type'] === 'UI')
+      .forEach(tc => selectedTCIds.add(tc['ID']));
+    renderTCSelectList();
+  });
+
+  $('autoSelectAPI')?.addEventListener('click', () => {
+    getFilteredTCs()
+      .filter(tc => tc['Type'] === 'API')
+      .forEach(tc => selectedTCIds.add(tc['ID']));
+    renderTCSelectList();
+  });
+
+  // ── AI Pick ─────────────────────────────────────────────────
+  $('autoSelectAI')?.addEventListener('click', async () => {
+    const apiKey = getActiveApiKey();
+    if (!apiKey) { showToast('Enter your API key first'); return; }
+
+    const btn = $('autoSelectAI');
+    if (btn) {
+      btn.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <path d="M8 2a6 6 0 1 0 6 6" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round"/>
+        </svg> Thinking…`;
+      btn.disabled = true;
+    }
+
+    try {
+      const tcSummary = getFilteredTCs()
+        .map(tc => `${tc['ID']} [${tc['Type']}] ${tc['Title']} (Priority: ${tc['Priority']})`)
+        .join('\n');
+
+      const reply = await callClaude(apiKey,
+        `You are a QA automation expert. Given a list of test cases, recommend the best ones 
+         to automate first based on: automation ROI, frequency of execution, stability, 
+         and coverage value. Return ONLY a comma-separated list of TC IDs, nothing else.
+         Example: TC-001,TC-003,TC-007`,
+        `Test cases:\n${tcSummary}\n\nWhich test case IDs should be automated first?
+         Return only the IDs as a comma-separated list.`
+      );
+
+      // Parse returned IDs
+      const recommended = reply
+        .replace(/[^TC\d,\-]/gi, '')
+        .split(',')
+        .map(id => id.trim().toUpperCase())
+        .filter(id => id.startsWith('TC'));
+
+      aiRecommendedIds = new Set(recommended);
+
+      // Select the recommended ones
+      selectedTCIds = new Set(recommended);
+      renderTCSelectList();
+      showToast(`✓ AI recommended ${recommended.length} test cases to automate`);
+
+    } catch (err) {
+      showToast('AI pick failed: ' + err.message);
+    }
+
+    if (btn) {
+      btn.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <path d="M8 2l1.5 3.5L13 7l-3.5 1.5L8 12l-1.5-3.5L3 7l3.5-1.5L8 2z"
+            fill="currentColor"/>
+        </svg> AI Pick`;
+      btn.disabled = false;
+    }
+  });
+
+  // ── Get filtered TCs ────────────────────────────────────────
+  function getFilteredTCs() {
+    return allParsedTCs.filter(tc => {
+      const matchModule = activeModuleFilter === 'all' ||
+        (tc['Module'] || 'General') === activeModuleFilter;
+      const matchType   = activeTypeFilter === 'all'  ||
+        tc['Type'] === activeTypeFilter                ||
+        tc['Priority'] === activeTypeFilter;
+      const matchSearch = !tcSearchQuery ||
+        tc['Title']?.toLowerCase().includes(tcSearchQuery) ||
+        tc['ID']?.toLowerCase().includes(tcSearchQuery)    ||
+        tc['Steps']?.toLowerCase().includes(tcSearchQuery);
+      return matchModule && matchType && matchSearch;
+    });
+  }
+
+  // ── Render TC list ──────────────────────────────────────────
+  function renderTCSelectList() {
+    if (!tcSelectList) return;
+    const filtered = getFilteredTCs();
+    tcSelectList.innerHTML = '';
+
+    if (!filtered.length) {
+      tcSelectList.innerHTML = `
+        <div style="text-align:center;padding:40px;color:var(--c-text-3);font-size:13px">
+          No test cases match the current filter
+        </div>`;
+      updateTCStats();
+      return;
+    }
+
+    filtered.forEach(tc => {
+      const id          = tc['ID'] || '';
+      const isSelected  = selectedTCIds.has(id);
+      const isAI        = aiRecommendedIds.has(id);
+      const type        = (tc['Type'] || 'UI').toLowerCase();
+      const priority    = (tc['Priority'] || 'Medium').toLowerCase();
+
+      const row = document.createElement('div');
+      row.className = [
+        'tc-select-row',
+        isSelected ? 'selected' : '',
+        isAI ? 'ai-recommended' : ''
+      ].filter(Boolean).join(' ');
+      row.dataset.id = id;
+
+      row.innerHTML = `
+        <div class="tc-row-checkbox">
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+            <path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="tc-row-body">
+          <div class="tc-row-top">
+            <span class="tc-row-id">${escHtml(id)}</span>
+            <span class="tc-row-title">${escHtml(tc['Title'] || '')}</span>
+            <div class="tc-row-tags">
+              <span class="tc-row-tag ${type}">${type.toUpperCase()}</span>
+              <span class="tc-row-tag ${priority}">${tc['Priority'] || 'Medium'}</span>
+              ${isAI ? '<span class="tc-row-tag ai">★ AI Pick</span>' : ''}
+            </div>
+          </div>
+          <div class="tc-row-preview">${escHtml((tc['Steps'] || '').substring(0, 80))}…</div>
+        </div>
+      `;
+
+      row.addEventListener('click', () => {
+        if (selectedTCIds.has(id)) selectedTCIds.delete(id);
+        else selectedTCIds.add(id);
+        row.classList.toggle('selected');
+        row.querySelector('.tc-row-checkbox svg').style.display =
+          selectedTCIds.has(id) ? 'block' : 'none';
+        row.querySelector('.tc-row-checkbox').style.background =
+          selectedTCIds.has(id) ? 'var(--c-accent)' : 'transparent';
+        row.querySelector('.tc-row-checkbox').style.borderColor =
+          selectedTCIds.has(id) ? 'var(--c-accent)' : '';
+        updateTCStats();
+      });
+
+      tcSelectList.appendChild(row);
+    });
+
+    updateTCStats();
+  }
+
+  // ── Update stats bar ────────────────────────────────────────
+  function updateTCStats() {
+    if (!tcSelectStats) return;
+    const total    = allParsedTCs.length;
+    const selected = selectedTCIds.size;
+    const ui       = allParsedTCs.filter(tc => selectedTCIds.has(tc['ID']) && tc['Type'] === 'UI').length;
+    const api      = allParsedTCs.filter(tc => selectedTCIds.has(tc['ID']) && tc['Type'] === 'API').length;
+    tcSelectStats.textContent =
+      `${selected} of ${total} selected  (${ui} UI · ${api} API)`;
+  }
+
+  // ── Confirm — regenerate scripts for selected TCs only ──────
+  tcSelectConfirm?.addEventListener('click', async () => {
+    if (selectedTCIds.size === 0) {
+      showToast('Select at least one test case');
+      return;
+    }
+
+    const apiKey = getActiveApiKey();
+    if (!apiKey) { showToast('Enter your API key first'); return; }
+
+    closeTCSelect();
+
+    // Filter test cases text to selected IDs only
+    const selectedTCs = allParsedTCs.filter(tc => selectedTCIds.has(tc['ID']));
+    const selectedText = selectedTCs
+      .map(tc =>
+        `${tc['ID']}: [${tc['Type']}] ${tc['Title']}\n` +
+        `Preconditions: ${tc['Preconditions']}\n` +
+        `Steps: ${tc['Steps']}\n` +
+        `Expected Result: ${tc['Expected Result']}\n` +
+        `Priority: ${tc['Priority']}`
+      ).join('\n\n');
+
+    showToast(`Generating scripts for ${selectedTCs.length} selected test cases…`);
+
+    // Update step UI
+    setStepState(2, 'running');
+    const c = $('content-2');
+    if (c) { c.setAttribute('hidden',''); c.innerHTML = ''; }
+    $('empty-2')?.removeAttribute('hidden');
+    showLoading(2);
+    switchTab(2);
+
+    try {
+      // Auth + API specs
+      const scripts1 = await callClaude(apiKey,
+        `You are a Cypress automation engineer. Write runnable Cypress spec files ONLY for the provided test cases.
+CRITICAL: Use ONLY this format:
+===FILE: path/filename===
+file content here
+===ENDFILE===`,
+        `Base URL: ${$('baseUrl')?.value.trim()}\n\n` +
+        `Generate Cypress spec files for ONLY these ${selectedTCs.length} test cases:\n\n` +
+        selectedText.substring(0, 3000)
+      );
+
+      // UI flows
+      const scripts2 = await callClaude(apiKey,
+        `You are a Cypress automation engineer. Write runnable Cypress spec files ONLY for the provided test cases.
+CRITICAL: Use ONLY this format:
+===FILE: path/filename===
+file content here
+===ENDFILE===`,
+        `Base URL: ${$('baseUrl')?.value.trim()}\n\n` +
+        `Continue generating Cypress specs for remaining test cases:\n\n` +
+        selectedText.substring(3000, 6000) || 'No remaining test cases.'
+      );
+
+      const combinedScripts = scripts1 + '\n' + scripts2;
+      results[2] = combinedScripts;
+
+      setStepState(2, 'done');
+      $('tab-2')?.classList.add('done');
+      renderPanel(2, combinedScripts);
+
+      showToast(`✓ Scripts generated for ${selectedTCs.length} test cases`);
+
+      // Re-run self-heal on new scripts
+      setStepState(3, 'running');
+      const healReport = await callClaude(apiKey,
+        `You are a test resilience engineer. Analyse Cypress specs and produce a self-healing report.
+For every fragile selector output:
+STALE: <original>
+REASON: why fragile
+✓ HEALED: <better selector>
+STRATEGY: data-cy | aria | text | composite`,
+        `Specs:\n${combinedScripts.substring(0, 1400)}\n\n` +
+        `Flag fragile selectors. Propose: data-cy > aria > text > CSS.`
+      );
+      results[3] = healReport;
+      setStepState(3, 'done');
+      $('tab-3')?.classList.add('done');
+      renderPanel(3, healReport);
+
+    } catch (err) {
+      setStepState(2, 'error');
+      showToast('Script generation failed: ' + err.message);
+      console.error(err);
+    }
+  });
+
+  // Enable TC select button when test cases panel is populated
+  const _origRenderPanel = renderPanel;
+  // Hook into renderPanel to enable button when panel 0 is ready
+  // (renderPanel is already defined above — add this after it)
 
 }); // end DOMContentLoaded

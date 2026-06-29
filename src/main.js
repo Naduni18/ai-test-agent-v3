@@ -37,6 +37,9 @@ app.whenReady().then(() => {
 
 // Save generated files to disk
 ipcMain.handle('save-output', async (_, { filename, content }) => {
+  if (_dialogOpen) return { success: false };
+  _dialogOpen = true;
+  try {
   const { filePath } = await dialog.showSaveDialog(win, {
     defaultPath: filename,
     filters: [{ name: 'All Files', extensions: ['*'] }]
@@ -46,15 +49,26 @@ ipcMain.handle('save-output', async (_, { filename, content }) => {
     return { success: true, path: filePath };
   }
   return { success: false };
+  } finally {
+    _dialogOpen = false;
+  }
 });
 
 // ── Pick a folder ────────────────────────────────────────────
+let _dialogOpen = false;
+
 ipcMain.handle('pick-folder', async () => {
-  const { filePaths } = await dialog.showOpenDialog(win, {
-    title: 'Choose folder to save Cypress framework',
-    properties: ['openDirectory', 'createDirectory']
-  });
-  return filePaths?.[0] ?? null;
+  if (_dialogOpen) return null;
+  _dialogOpen = true;
+  try {
+    const { filePaths } = await dialog.showOpenDialog(win, {
+      title:      'Choose folder to save Cypress framework',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    return filePaths?.[0] ?? null;
+  } finally {
+    _dialogOpen = false;
+  }
 });
 
 // ── Write multiple files into that folder ────────────────────
@@ -116,11 +130,17 @@ ipcMain.handle('extract-file-text', async (_, { name, ext, data }) => {
 
 // ── Pick a folder to save/load session ──────────────────────
 ipcMain.handle('pick-session-folder', async () => {
-  const { filePaths } = await dialog.showOpenDialog(win, {
-    title:      'Choose folder to save / load session',
-    properties: ['openDirectory', 'createDirectory']
-  });
-  return filePaths?.[0] ?? null;
+  if (_dialogOpen) return null;
+  _dialogOpen = true;
+  try {
+    const { filePaths } = await dialog.showOpenDialog(win, {
+      title:      'Choose folder to save / load session',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    return filePaths?.[0] ?? null;
+  } finally {
+    _dialogOpen = false;
+  }
 });
 
 // ── Save session JSON to folder ──────────────────────────────
@@ -680,22 +700,31 @@ print(f"Saved {total} test cases to {output_path}")
 }
 
 // Proxy Claude API calls (keeps key off renderer)
-ipcMain.handle('claude-call', async (_, { apiKey, system, user }) => {
-  const { net } = require('electron');
+ipcMain.handle('claude-call', async (_, { apiKey, system, user, provider, model }) => {
+  if (provider === 'openai') {
+    return callOpenAIMain(apiKey, system, user, model);
+  }
+  return callAnthropicMain(apiKey, system, user, model);
+});
+
+/* ── Anthropic call (main process) ───────────────────────── */
+function callAnthropicMain(apiKey, system, user, model) {
   return new Promise((resolve, reject) => {
+    const { net } = require('electron');
     const request = net.request({
       method: 'POST',
-      url: 'https://api.anthropic.com/v1/messages',
+      url:    'https://api.anthropic.com/v1/messages',
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        'Content-Type':      'application/json',
+        'x-api-key':         apiKey,
         'anthropic-version': '2023-06-01'
       }
     });
+
     let body = '';
-    request.on('response', (res) => {
-      res.on('data', (chunk) => { body += chunk.toString(); });
-      res.on('end', () => {
+    request.on('response', res => {
+      res.on('data',  chunk => { body += chunk.toString(); });
+      res.on('end',   () => {
         try {
           const data = JSON.parse(body);
           if (data.error) reject(new Error(data.error.message));
@@ -704,15 +733,58 @@ ipcMain.handle('claude-call', async (_, { apiKey, system, user }) => {
       });
     });
     request.on('error', reject);
+
     request.write(JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model:      model || 'claude-sonnet-4-6',
       max_tokens: 8000,
       system,
-      messages: [{ role: 'user', content: user }]
+      messages:   [{ role: 'user', content: user }]
     }));
     request.end();
   });
-});
+}
+
+/* ── OpenAI call (main process) ──────────────────────────── */
+function callOpenAIMain(apiKey, system, user, model) {
+  return new Promise((resolve, reject) => {
+    const { net } = require('electron');
+    const request = net.request({
+      method: 'POST',
+      url:    'https://api.openai.com/v1/chat/completions',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      }
+    });
+
+    let body = '';
+    request.on('response', res => {
+      res.on('data',  chunk => { body += chunk.toString(); });
+      res.on('end',   () => {
+        try {
+          const data = JSON.parse(body);
+          if (data.error) reject(new Error(data.error.message));
+          else {
+            const text = data.choices?.[0]?.message?.content;
+            if (!text) reject(new Error('Empty response from OpenAI'));
+            else resolve(text);
+          }
+        } catch (e) { reject(e); }
+      });
+    });
+    request.on('error', reject);
+
+    request.write(JSON.stringify({
+      model:      model || 'gpt-4o',
+      max_tokens: 8000,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user',   content: user   }
+      ]
+    }));
+    request.end();
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
